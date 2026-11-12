@@ -3,9 +3,10 @@
  * PIM - ADS (UNIP) - Digitalizacao de processos de atendimento
  *
  * Modo console, persistencia em arquivos de texto:
- *   clientes.txt  -> cpf;nome;telefone;endereco
- *   veiculos.txt  -> placa;modelo;ano;combustivel;cpf_proprietario
+ *   clientes.txt -> cpf;nome;telefone
+ *   veiculos.txt -> placa;marca;modelo;ano;motor;combustivel;cpf_cliente
  *
+ * As funcoes seguem os nomes do pseudocodigo do Capitulo 5 (secao 5.3).
  * Compilar: gcc -Wall -o auto_center main.c
  */
 #include <stdio.h>
@@ -18,63 +19,56 @@
 #define ARQ_CLIENTES "clientes.txt"
 #define ARQ_VEICULOS "veiculos.txt"
 
+/* A. Estruturas de dados */
 typedef struct {
-    char cpf[12];       /* 11 digitos, identificador unico */
+    char cpf[12];          /* 11 digitos, identificador unico (RN02) */
     char nome[60];
     char telefone[16];
-    char endereco[80];
 } Cliente;
 
 typedef struct {
-    char placa[8];      /* 7 caracteres, identificador unico */
-    char modelo[40];
+    char placa[8];         /* identificador unico (RN03) */
+    char marca[30];
+    char modelo[30];
     int  ano;
-    char combustivel[16];
-    char cpf[12];       /* referencia ao proprietario */
+    char motor[20];
+    char combustivel[20];
+    char cpf_cliente[12];  /* vinculo com o proprietario (RN01) */
 } Veiculo;
 
 static Cliente clientes[MAX_CLIENTES];
 static Veiculo veiculos[MAX_VEICULOS];
 static int totalClientes = 0;
 static int totalVeiculos = 0;
+static char opcoesMenu[5][30];
 
-static const char *MENU[10] = {
-    "1 - Cadastrar cliente",
-    "2 - Cadastrar veiculo",
-    "3 - Consultar (CPF, telefone ou placa)",
-    "4 - Atualizar cliente",
-    "5 - Atualizar veiculo",
-    "6 - Excluir cliente (e seus veiculos)",
-    "7 - Excluir veiculo",
-    "8 - Relatorio de clientes",
-    "9 - Relatorio de veiculos",
-    "0 - Sair"
-};
+/* ---------- utilidades de entrada ---------- */
 
-/* ---------- entrada e utilidades ---------- */
+static void copiar(char *dest, const char *orig, int tam) {
+    strncpy(dest, orig, (size_t)tam - 1);
+    dest[tam - 1] = '\0';
+}
 
-static void lerLinha(const char *msg, char *dest, int tam) {
+static void lerTexto(const char *msg, char *dest, int tam) {
     char *p;
     printf("%s", msg);
     if (fgets(dest, tam, stdin) == NULL) { dest[0] = '\0'; return; }
+    if (strchr(dest, '\n') == NULL) {            /* descarta o excesso da linha */
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF) { }
+    }
     dest[strcspn(dest, "\r\n")] = '\0';
-    while ((p = strchr(dest, ';')) != NULL) *p = ',';  /* ';' e o separador do arquivo */
+    while ((p = strchr(dest, ';')) != NULL) *p = ',';   /* ';' separa os campos */
 }
 
 static int lerInteiro(const char *msg) {
     char buf[32];
-    lerLinha(msg, buf, sizeof buf);
+    lerTexto(msg, buf, sizeof buf);
     return atoi(buf);
 }
 
-static int confirmar(const char *msg) {
-    char buf[8];
-    lerLinha(msg, buf, sizeof buf);
-    return toupper((unsigned char)buf[0]) == 'S';
-}
-
 static void soDigitos(const char *orig, char *dest, int tam) {
-    int j = 0, i;
+    int i, j = 0;
     for (i = 0; orig[i] != '\0' && j < tam - 1; i++)
         if (isdigit((unsigned char)orig[i])) dest[j++] = orig[i];
     dest[j] = '\0';
@@ -84,51 +78,125 @@ static void maiusculas(char *s) {
     for (; *s; s++) *s = (char)toupper((unsigned char)*s);
 }
 
-/* ---------- validacoes ---------- */
+static int confirmar(const char *msg) {
+    char r[8];
+    lerTexto(msg, r, sizeof r);
+    return r[0] == 'S' || r[0] == 's';
+}
 
-static int validarCPF(const char *cpf) {
-    int i, soma, d1, d2, iguais = 1;
+/* ---------- C. Persistencia em arquivos ---------- */
+
+static int separar(char *linha, char *campos[], int n) {
+    int k = 0;
+    char *p = linha;
+    while (k < n) {
+        campos[k++] = p;
+        p = strchr(p, ';');
+        if (p == NULL) break;
+        *p++ = '\0';
+    }
+    return k == n;
+}
+
+static void carregarDados(void) {
+    FILE *f;
+    char linha[300], *c[7];
+
+    totalClientes = 0;
+    totalVeiculos = 0;
+
+    f = fopen(ARQ_CLIENTES, "r");
+    if (f != NULL) {
+        while (totalClientes < MAX_CLIENTES && fgets(linha, sizeof linha, f)) {
+            linha[strcspn(linha, "\r\n")] = '\0';
+            if (separar(linha, c, 3)) {
+                Cliente *x = &clientes[totalClientes++];
+                copiar(x->cpf, c[0], sizeof x->cpf);
+                copiar(x->nome, c[1], sizeof x->nome);
+                copiar(x->telefone, c[2], sizeof x->telefone);
+            }
+        }
+        fclose(f);
+    }
+
+    f = fopen(ARQ_VEICULOS, "r");
+    if (f != NULL) {
+        while (totalVeiculos < MAX_VEICULOS && fgets(linha, sizeof linha, f)) {
+            linha[strcspn(linha, "\r\n")] = '\0';
+            if (separar(linha, c, 7)) {
+                Veiculo *v = &veiculos[totalVeiculos++];
+                copiar(v->placa, c[0], sizeof v->placa);
+                copiar(v->marca, c[1], sizeof v->marca);
+                copiar(v->modelo, c[2], sizeof v->modelo);
+                v->ano = atoi(c[3]);
+                copiar(v->motor, c[4], sizeof v->motor);
+                copiar(v->combustivel, c[5], sizeof v->combustivel);
+                copiar(v->cpf_cliente, c[6], sizeof v->cpf_cliente);
+            }
+        }
+        fclose(f);
+    }
+}
+
+static void gravarDados(void) {
+    FILE *f;
+    int i;
+
+    f = fopen(ARQ_CLIENTES, "w");
+    if (f == NULL) { printf("Erro ao gravar %s\n", ARQ_CLIENTES); return; }
+    for (i = 0; i < totalClientes; i++)
+        fprintf(f, "%s;%s;%s\n", clientes[i].cpf, clientes[i].nome, clientes[i].telefone);
+    fclose(f);
+
+    f = fopen(ARQ_VEICULOS, "w");
+    if (f == NULL) { printf("Erro ao gravar %s\n", ARQ_VEICULOS); return; }
+    for (i = 0; i < totalVeiculos; i++)
+        fprintf(f, "%s;%s;%s;%d;%s;%s;%s\n", veiculos[i].placa, veiculos[i].marca,
+                veiculos[i].modelo, veiculos[i].ano, veiculos[i].motor,
+                veiculos[i].combustivel, veiculos[i].cpf_cliente);
+    fclose(f);
+}
+
+/* ---------- D. Validacoes ---------- */
+
+static int validarCpf(const char *cpf) {
+    int i, k, n, soma, resto, iguais = 1;
+
     if (strlen(cpf) != 11) return 0;
     for (i = 0; i < 11; i++) {
         if (!isdigit((unsigned char)cpf[i])) return 0;
         if (cpf[i] != cpf[0]) iguais = 0;
     }
     if (iguais) return 0;
-    for (soma = 0, i = 0; i < 9; i++) soma += (cpf[i] - '0') * (10 - i);
-    d1 = (soma * 10) % 11; if (d1 == 10) d1 = 0;
-    for (soma = 0, i = 0; i < 10; i++) soma += (cpf[i] - '0') * (11 - i);
-    d2 = (soma * 10) % 11; if (d2 == 10) d2 = 0;
-    return d1 == cpf[9] - '0' && d2 == cpf[10] - '0';
+
+    for (k = 1; k <= 2; k++) {          /* 1o e 2o digitos verificadores */
+        n = 8 + k;                      /* 9 digitos no 1o calculo, 10 no 2o */
+        soma = 0;
+        for (i = 0; i < n; i++) soma += (cpf[i] - '0') * (n + 1 - i);
+        resto = (soma * 10) % 11;
+        if (resto == 10) resto = 0;
+        if (resto != cpf[n] - '0') return 0;
+    }
+    return 1;
 }
 
 /* Aceita AAA9999 (antiga) e AAA9A99 (Mercosul) */
 static int validarPlaca(const char *p) {
     int i;
     if (strlen(p) != 7) return 0;
-    for (i = 0; i < 3; i++) if (!isupper((unsigned char)p[i])) return 0;
+    for (i = 0; i < 3; i++)
+        if (!isalpha((unsigned char)p[i])) return 0;
     if (!isdigit((unsigned char)p[3])) return 0;
-    if (!isdigit((unsigned char)p[4]) && !isupper((unsigned char)p[4])) return 0;
+    if (!isdigit((unsigned char)p[4]) && !isalpha((unsigned char)p[4])) return 0;
     return isdigit((unsigned char)p[5]) && isdigit((unsigned char)p[6]);
 }
 
-static int validarTelefone(const char *t) {
-    int n = (int)strlen(t);
-    return n == 10 || n == 11;
-}
+/* ---------- E. Funcoes de busca ---------- */
 
-/* ---------- busca ---------- */
-
-static int buscarClientePorCPF(const char *cpf) {
+static int buscarClientePorCpf(const char *cpf) {
     int i;
     for (i = 0; i < totalClientes; i++)
         if (strcmp(clientes[i].cpf, cpf) == 0) return i;
-    return -1;
-}
-
-static int buscarClientePorTelefone(const char *tel) {
-    int i;
-    for (i = 0; i < totalClientes; i++)
-        if (strcmp(clientes[i].telefone, tel) == 0) return i;
     return -1;
 }
 
@@ -139,329 +207,316 @@ static int buscarVeiculoPorPlaca(const char *placa) {
     return -1;
 }
 
-/* ---------- persistencia ---------- */
+/* O telefone pode ser compartilhado: lista os clientes e o atendente escolhe */
+static int escolherClientePorTelefone(const char *telefone) {
+    int ocorrencias[MAX_CLIENTES];
+    int i, encontrados = 0, escolha;
 
-static void salvarDados(void) {
-    FILE *f;
-    int i;
-    f = fopen(ARQ_CLIENTES, "w");
-    if (f == NULL) { printf("Erro ao gravar %s\n", ARQ_CLIENTES); return; }
-    for (i = 0; i < totalClientes; i++)
-        fprintf(f, "%s;%s;%s;%s\n", clientes[i].cpf, clientes[i].nome,
-                clientes[i].telefone, clientes[i].endereco);
-    fclose(f);
-    f = fopen(ARQ_VEICULOS, "w");
-    if (f == NULL) { printf("Erro ao gravar %s\n", ARQ_VEICULOS); return; }
-    for (i = 0; i < totalVeiculos; i++)
-        fprintf(f, "%s;%s;%d;%s;%s\n", veiculos[i].placa, veiculos[i].modelo,
-                veiculos[i].ano, veiculos[i].combustivel, veiculos[i].cpf);
-    fclose(f);
-}
-
-static void carregarDados(void) {
-    FILE *f;
-    char linha[256], *campo[5];
-    int n;
-    char *p;
-
-    f = fopen(ARQ_CLIENTES, "r");
-    if (f != NULL) {
-        while (totalClientes < MAX_CLIENTES && fgets(linha, sizeof linha, f)) {
-            linha[strcspn(linha, "\r\n")] = '\0';
-            n = 0; p = linha;
-            while (n < 4) { campo[n++] = p; p = strchr(p, ';'); if (!p) break; *p++ = '\0'; }
-            if (n == 4) {
-                Cliente *c = &clientes[totalClientes++];
-                strncpy(c->cpf, campo[0], sizeof c->cpf - 1);           c->cpf[sizeof c->cpf - 1] = '\0';
-                strncpy(c->nome, campo[1], sizeof c->nome - 1);         c->nome[sizeof c->nome - 1] = '\0';
-                strncpy(c->telefone, campo[2], sizeof c->telefone - 1); c->telefone[sizeof c->telefone - 1] = '\0';
-                strncpy(c->endereco, campo[3], sizeof c->endereco - 1); c->endereco[sizeof c->endereco - 1] = '\0';
-            }
+    for (i = 0; i < totalClientes; i++) {
+        if (strcmp(clientes[i].telefone, telefone) == 0) {
+            ocorrencias[encontrados++] = i;
+            printf("%d. %s\n", encontrados, clientes[i].nome);
         }
-        fclose(f);
     }
+    if (encontrados == 0) return -1;
+    if (encontrados == 1) return ocorrencias[0];
 
-    f = fopen(ARQ_VEICULOS, "r");
-    if (f != NULL) {
-        while (totalVeiculos < MAX_VEICULOS && fgets(linha, sizeof linha, f)) {
-            linha[strcspn(linha, "\r\n")] = '\0';
-            n = 0; p = linha;
-            while (n < 5) { campo[n++] = p; p = strchr(p, ';'); if (!p) break; *p++ = '\0'; }
-            if (n == 5) {
-                Veiculo *v = &veiculos[totalVeiculos++];
-                strncpy(v->placa, campo[0], sizeof v->placa - 1);             v->placa[sizeof v->placa - 1] = '\0';
-                strncpy(v->modelo, campo[1], sizeof v->modelo - 1);           v->modelo[sizeof v->modelo - 1] = '\0';
-                v->ano = atoi(campo[2]);
-                strncpy(v->combustivel, campo[3], sizeof v->combustivel - 1); v->combustivel[sizeof v->combustivel - 1] = '\0';
-                strncpy(v->cpf, campo[4], sizeof v->cpf - 1);                 v->cpf[sizeof v->cpf - 1] = '\0';
-            }
-        }
-        fclose(f);
-    }
+    printf("Mais de um cliente com este telefone.\n");
+    escolha = lerInteiro("Confirme o nome com o cliente e informe o numero: ");
+    if (escolha < 1 || escolha > encontrados) return -1;
+    return ocorrencias[escolha - 1];
 }
 
-/* ---------- exibicao ---------- */
-
-static void mostrarCliente(const Cliente *c) {
-    printf("  CPF........: %s\n  Nome.......: %s\n  Telefone...: %s\n  Endereco...: %s\n",
-           c->cpf, c->nome, c->telefone, c->endereco);
-}
-
-static void mostrarVeiculo(const Veiculo *v) {
-    printf("  Placa: %s | Modelo: %s | Ano: %d | Combustivel: %s | CPF: %s\n",
-           v->placa, v->modelo, v->ano, v->combustivel, v->cpf);
-}
-
-static void mostrarVeiculosDoCliente(const char *cpf) {
-    int i, achou = 0;
-    for (i = 0; i < totalVeiculos; i++)
-        if (strcmp(veiculos[i].cpf, cpf) == 0) { mostrarVeiculo(&veiculos[i]); achou = 1; }
-    if (!achou) printf("  (nenhum veiculo cadastrado)\n");
-}
-
-/* ---------- funcionalidades ---------- */
+/* ---------- F. Cadastro de cliente ---------- */
 
 static void cadastrarCliente(void) {
-    Cliente c;
-    char buf[64];
-    if (totalClientes >= MAX_CLIENTES) { printf("Limite de clientes atingido.\n"); return; }
+    char buf[64], cpf[12], nome[60], telefone[16];
 
-    lerLinha("CPF (somente numeros): ", buf, sizeof buf);
-    soDigitos(buf, c.cpf, sizeof c.cpf);
-    if (!validarCPF(c.cpf)) { printf("CPF invalido.\n"); return; }
-    if (buscarClientePorCPF(c.cpf) >= 0) { printf("CPF ja cadastrado.\n"); return; }
+    printf("=== CADASTRO DE CLIENTE ===\n");
+    lerTexto("CPF (somente numeros): ", buf, sizeof buf);
+    soDigitos(buf, cpf, sizeof cpf);
+    if (!validarCpf(cpf)) { printf("Erro: CPF invalido!\n"); return; }
+    if (buscarClientePorCpf(cpf) != -1) {
+        printf("Erro (RN02): CPF ja cadastrado!\n");
+        return;
+    }
+    if (totalClientes == MAX_CLIENTES) { printf("Erro: limite de clientes atingido!\n"); return; }
 
-    lerLinha("Nome: ", c.nome, sizeof c.nome);
-    if (strlen(c.nome) == 0) { printf("Nome obrigatorio.\n"); return; }
+    do {
+        lerTexto("Nome: ", nome, sizeof nome);
+        lerTexto("Telefone (DDD + numero): ", buf, sizeof buf);
+        soDigitos(buf, telefone, sizeof telefone);
+        if (nome[0] == '\0' || telefone[0] == '\0')
+            printf("Erro (RN04): nome e telefone sao obrigatorios!\n");
+    } while (nome[0] == '\0' || telefone[0] == '\0');
 
-    lerLinha("Telefone (DDD + numero): ", buf, sizeof buf);
-    soDigitos(buf, c.telefone, sizeof c.telefone);
-    if (!validarTelefone(c.telefone)) { printf("Telefone invalido (use 10 ou 11 digitos).\n"); return; }
-    if (buscarClientePorTelefone(c.telefone) >= 0) { printf("Telefone ja cadastrado.\n"); return; }
-
-    lerLinha("Endereco: ", c.endereco, sizeof c.endereco);
-
-    clientes[totalClientes++] = c;
-    salvarDados();
-    printf("Cliente cadastrado com sucesso.\n");
+    copiar(clientes[totalClientes].cpf, cpf, sizeof clientes[0].cpf);
+    copiar(clientes[totalClientes].nome, nome, sizeof clientes[0].nome);
+    copiar(clientes[totalClientes].telefone, telefone, sizeof clientes[0].telefone);
+    totalClientes++;
+    gravarDados();
+    printf("Cliente cadastrado com sucesso!\n");
 }
+
+/* ---------- G. Cadastro de veiculo ---------- */
 
 static void cadastrarVeiculo(void) {
-    Veiculo v;
-    char buf[64];
-    if (totalVeiculos >= MAX_VEICULOS) { printf("Limite de veiculos atingido.\n"); return; }
+    char buf[64], cpf[12], placa[16];
+    int indiceCliente;
+    Veiculo *v;
 
-    lerLinha("CPF do proprietario: ", buf, sizeof buf);
-    soDigitos(buf, v.cpf, sizeof v.cpf);
-    if (buscarClientePorCPF(v.cpf) < 0) { printf("Cliente nao encontrado. Cadastre o cliente primeiro.\n"); return; }
+    printf("=== CADASTRO DE VEICULO ===\n");
+    lerTexto("CPF do proprietario: ", buf, sizeof buf);
+    soDigitos(buf, cpf, sizeof cpf);
+    indiceCliente = buscarClientePorCpf(cpf);
+    if (indiceCliente == -1) {
+        printf("Erro (RN01): veiculo nao pode ser cadastrado\nsem um cliente valido!\n");
+        return;
+    }
+    printf("Proprietario: %s\n", clientes[indiceCliente].nome);
 
-    lerLinha("Placa (ex.: ABC1234 ou ABC1D23): ", v.placa, sizeof v.placa);
-    maiusculas(v.placa);
-    if (!validarPlaca(v.placa)) { printf("Placa invalida.\n"); return; }
-    if (buscarVeiculoPorPlaca(v.placa) >= 0) { printf("Placa ja cadastrada.\n"); return; }
+    lerTexto("Placa: ", placa, sizeof placa);
+    maiusculas(placa);
+    if (!validarPlaca(placa)) { printf("Erro: placa invalida!\n"); return; }
+    if (buscarVeiculoPorPlaca(placa) != -1) { printf("Erro (RN03): placa ja cadastrada!\n"); return; }
+    if (totalVeiculos == MAX_VEICULOS) { printf("Erro: limite de veiculos atingido!\n"); return; }
 
-    lerLinha("Modelo: ", v.modelo, sizeof v.modelo);
-    if (strlen(v.modelo) == 0) { printf("Modelo obrigatorio.\n"); return; }
-    v.ano = lerInteiro("Ano: ");
-    if (v.ano < 1900 || v.ano > 2100) { printf("Ano invalido.\n"); return; }
-    lerLinha("Combustivel: ", v.combustivel, sizeof v.combustivel);
-
-    veiculos[totalVeiculos++] = v;
-    salvarDados();
-    printf("Veiculo cadastrado com sucesso.\n");
+    v = &veiculos[totalVeiculos];
+    copiar(v->placa, placa, sizeof v->placa);
+    lerTexto("Marca: ", v->marca, sizeof v->marca);
+    lerTexto("Modelo: ", v->modelo, sizeof v->modelo);
+    v->ano = lerInteiro("Ano: ");
+    lerTexto("Motor: ", v->motor, sizeof v->motor);
+    lerTexto("Combustivel: ", v->combustivel, sizeof v->combustivel);
+    copiar(v->cpf_cliente, cpf, sizeof v->cpf_cliente);
+    totalVeiculos++;
+    gravarDados();
+    printf("Veiculo vinculado e cadastrado com sucesso!\n");
 }
 
-static void consultar(void) {
+/* ---------- H. Consulta ---------- */
+
+static void exibirCliente(int i) {
+    int j, quantidade = 0;
+    printf("Cliente encontrado:\n");
+    printf("%s | %s | %s\n", clientes[i].cpf, clientes[i].nome, clientes[i].telefone);
+    printf("Veiculos vinculados:\n");
+    for (j = 0; j < totalVeiculos; j++) {
+        if (strcmp(veiculos[j].cpf_cliente, clientes[i].cpf) == 0) {
+            printf("%s | %s | %s | %d\n", veiculos[j].placa, veiculos[j].marca,
+                   veiculos[j].modelo, veiculos[j].ano);
+            quantidade++;
+        }
+    }
+    if (quantidade == 0) printf("Nenhum veiculo vinculado.\n");
+}
+
+/* ---------- J (auxiliar). Remocao de registro do vetor ---------- */
+
+static void removerVeiculo(int j) {
+    int k;
+    for (k = j; k < totalVeiculos - 1; k++) veiculos[k] = veiculos[k + 1];
+    totalVeiculos--;
+}
+
+/* ---------- I. Atualizacao ---------- */
+
+static int escolherVeiculoDoCliente(int i) {
+    char placa[16];
+    int j;
+    lerTexto("Placa: ", placa, sizeof placa);
+    maiusculas(placa);
+    j = buscarVeiculoPorPlaca(placa);
+    if (j == -1 || strcmp(veiculos[j].cpf_cliente, clientes[i].cpf) != 0) {
+        printf("Veiculo nao encontrado para este cliente.\n");
+        return -1;
+    }
+    return j;
+}
+
+static void atualizarCliente(int i) {
+    char novoNome[60], buf[64], novoTelefone[16];
+
+    printf("Deixe em branco para manter o valor atual.\n");
+    lerTexto("Novo nome: ", novoNome, sizeof novoNome);
+    lerTexto("Novo telefone: ", buf, sizeof buf);
+    soDigitos(buf, novoTelefone, sizeof novoTelefone);
+
+    if (novoNome[0] != '\0') copiar(clientes[i].nome, novoNome, sizeof clientes[i].nome);
+    if (novoTelefone[0] != '\0') copiar(clientes[i].telefone, novoTelefone, sizeof clientes[i].telefone);
+    gravarDados();
+    printf("Cadastro atualizado com sucesso!\n");
+}
+
+static void atualizarVeiculo(int j) {
+    char marca[30], modelo[30], motor[20], combustivel[20];
+    int ano;
+
+    printf("Deixe em branco para manter o valor atual.\n");
+    lerTexto("Nova marca: ", marca, sizeof marca);
+    lerTexto("Novo modelo: ", modelo, sizeof modelo);
+    ano = lerInteiro("Novo ano (0 mantem): ");
+    lerTexto("Novo motor: ", motor, sizeof motor);
+    lerTexto("Novo combustivel: ", combustivel, sizeof combustivel);
+
+    if (marca[0] != '\0') copiar(veiculos[j].marca, marca, sizeof veiculos[j].marca);
+    if (modelo[0] != '\0') copiar(veiculos[j].modelo, modelo, sizeof veiculos[j].modelo);
+    if (ano > 0) veiculos[j].ano = ano;
+    if (motor[0] != '\0') copiar(veiculos[j].motor, motor, sizeof veiculos[j].motor);
+    if (combustivel[0] != '\0') copiar(veiculos[j].combustivel, combustivel, sizeof veiculos[j].combustivel);
+    gravarDados();
+    printf("Cadastro atualizado com sucesso!\n");
+}
+
+/* ---------- J. Exclusao ---------- */
+
+static void excluirCliente(int i) {
+    char cpf[12];
+    int j, k, quantidade = 0;
+
+    copiar(cpf, clientes[i].cpf, sizeof cpf);
+    for (j = 0; j < totalVeiculos; j++)
+        if (strcmp(veiculos[j].cpf_cliente, cpf) == 0) quantidade++;
+
+    printf("Excluir %s e %d veiculo(s) vinculado(s)?\n", clientes[i].nome, quantidade);
+    if (!confirmar("Confirma (S/N)? ")) { printf("Exclusao cancelada.\n"); return; }
+
+    j = 0;
+    while (j < totalVeiculos) {
+        if (strcmp(veiculos[j].cpf_cliente, cpf) == 0)
+            removerVeiculo(j);              /* exclusao em cascata (RN05) */
+        else
+            j++;
+    }
+    for (k = i; k < totalClientes - 1; k++) clientes[k] = clientes[k + 1];
+    totalClientes--;
+    gravarDados();
+    printf("Cliente e veiculos vinculados excluidos com sucesso!\n");
+}
+
+static void excluirVeiculo(int j) {
+    printf("Excluir o veiculo %s?\n", veiculos[j].placa);
+    if (!confirmar("Confirma (S/N)? ")) { printf("Exclusao cancelada.\n"); return; }
+    removerVeiculo(j);
+    gravarDados();
+    printf("Veiculo excluido com sucesso!\n");
+}
+
+/* ---------- I. Acoes sobre o cadastro localizado ---------- */
+
+static void acaoSobreCadastro(int i) {
+    int acao, j;
+
+    printf("1 - Atualizar cliente   2 - Atualizar veiculo\n");
+    printf("3 - Excluir cliente     4 - Excluir veiculo\n");
+    printf("0 - Voltar\n");
+    acao = lerInteiro("Opcao: ");
+
+    switch (acao) {
+    case 1: atualizarCliente(i); break;
+    case 2:
+        j = escolherVeiculoDoCliente(i);
+        if (j != -1) atualizarVeiculo(j);
+        break;
+    case 3: excluirCliente(i); break;
+    case 4:
+        j = escolherVeiculoDoCliente(i);
+        if (j != -1) excluirVeiculo(j);
+        break;
+    case 0: return;
+    default: printf("Opcao invalida!\n");
+    }
+}
+
+static void consultarCadastro(void) {
     char buf[64], chave[16];
-    int idx, opcao;
+    int criterio, indiceCliente = -1, indiceVeiculo;
 
-    printf("Buscar por: 1-CPF  2-Telefone  3-Placa\n");
-    opcao = lerInteiro("Opcao: ");
+    printf("=== CONSULTA DE CADASTRO ===\n");
+    printf("1 - Buscar por CPF\n2 - Buscar por telefone\n3 - Buscar por placa\n");
+    criterio = lerInteiro("Opcao: ");
 
-    switch (opcao) {
+    switch (criterio) {
     case 1:
-        lerLinha("CPF: ", buf, sizeof buf);
+        lerTexto("CPF: ", buf, sizeof buf);
         soDigitos(buf, chave, sizeof chave);
-        idx = buscarClientePorCPF(chave);
+        indiceCliente = buscarClientePorCpf(chave);
         break;
     case 2:
-        lerLinha("Telefone: ", buf, sizeof buf);
+        lerTexto("Telefone: ", buf, sizeof buf);
         soDigitos(buf, chave, sizeof chave);
-        idx = buscarClientePorTelefone(chave);
+        indiceCliente = escolherClientePorTelefone(chave);
         break;
     case 3:
-        lerLinha("Placa: ", chave, sizeof chave);
+        lerTexto("Placa: ", chave, sizeof chave);
         maiusculas(chave);
-        idx = buscarVeiculoPorPlaca(chave);
-        if (idx < 0) { printf("Nao encontrado.\n"); return; }
-        idx = buscarClientePorCPF(veiculos[idx].cpf);
+        indiceVeiculo = buscarVeiculoPorPlaca(chave);
+        if (indiceVeiculo != -1)
+            indiceCliente = buscarClientePorCpf(veiculos[indiceVeiculo].cpf_cliente);
         break;
     default:
-        printf("Opcao invalida.\n");
+        printf("Opcao invalida!\n");
         return;
     }
 
-    if (idx < 0) { printf("Nao encontrado.\n"); return; }
-    printf("\n--- Cliente ---\n");
-    mostrarCliente(&clientes[idx]);
-    printf("--- Veiculos ---\n");
-    mostrarVeiculosDoCliente(clientes[idx].cpf);
+    if (indiceCliente == -1) { printf("Nenhum cadastro encontrado.\n"); return; }
+    exibirCliente(indiceCliente);
+    acaoSobreCadastro(indiceCliente);
 }
 
-static void atualizarCliente(void) {
-    char buf[64], novo[80];
-    int idx;
-    lerLinha("CPF do cliente: ", buf, sizeof buf);
-    soDigitos(buf, buf, sizeof buf);
-    idx = buscarClientePorCPF(buf);
-    if (idx < 0) { printf("Cliente nao encontrado.\n"); return; }
+/* ---------- K. Relatorios ---------- */
 
-    mostrarCliente(&clientes[idx]);
-    printf("(Deixe em branco para manter o valor atual. O CPF nao pode ser alterado.)\n");
+static void emitirRelatorios(void) {
+    int i;
 
-    lerLinha("Novo nome: ", novo, sizeof novo);
-    if (strlen(novo) > 0) { strncpy(clientes[idx].nome, novo, sizeof clientes[idx].nome - 1); }
-
-    lerLinha("Novo telefone: ", buf, sizeof buf);
-    if (strlen(buf) > 0) {
-        soDigitos(buf, novo, sizeof novo);
-        int outro = buscarClientePorTelefone(novo);
-        if (!validarTelefone(novo)) printf("Telefone invalido, mantido o anterior.\n");
-        else if (outro >= 0 && outro != idx) printf("Telefone ja usado por outro cliente, mantido o anterior.\n");
-        else strncpy(clientes[idx].telefone, novo, sizeof clientes[idx].telefone - 1);
+    printf("=== RELATORIO DE CLIENTES ===\n");
+    if (totalClientes == 0) {
+        printf("Nenhum cliente cadastrado.\n");
+    } else {
+        printf("CPF | NOME | TELEFONE\n");
+        for (i = 0; i < totalClientes; i++)
+            printf("%s | %s | %s\n", clientes[i].cpf, clientes[i].nome, clientes[i].telefone);
     }
+    printf("Total de clientes: %d\n", totalClientes);
 
-    lerLinha("Novo endereco: ", novo, sizeof novo);
-    if (strlen(novo) > 0) strncpy(clientes[idx].endereco, novo, sizeof clientes[idx].endereco - 1);
-
-    salvarDados();
-    printf("Cliente atualizado.\n");
-}
-
-static void atualizarVeiculo(void) {
-    char placa[16], novo[64];
-    int idx, ano;
-    lerLinha("Placa do veiculo: ", placa, sizeof placa);
-    maiusculas(placa);
-    idx = buscarVeiculoPorPlaca(placa);
-    if (idx < 0) { printf("Veiculo nao encontrado.\n"); return; }
-
-    mostrarVeiculo(&veiculos[idx]);
-    printf("(Deixe em branco para manter o valor atual. Placa e proprietario nao podem ser alterados.)\n");
-
-    lerLinha("Novo modelo: ", novo, sizeof novo);
-    if (strlen(novo) > 0) strncpy(veiculos[idx].modelo, novo, sizeof veiculos[idx].modelo - 1);
-
-    lerLinha("Novo ano: ", novo, sizeof novo);
-    if (strlen(novo) > 0) {
-        ano = atoi(novo);
-        if (ano >= 1900 && ano <= 2100) veiculos[idx].ano = ano;
-        else printf("Ano invalido, mantido o anterior.\n");
+    printf("=== RELATORIO DE VEICULOS ===\n");
+    if (totalVeiculos == 0) {
+        printf("Nenhum veiculo cadastrado.\n");
+    } else {
+        printf("PLACA | MARCA | MODELO | ANO | CPF DO PROPRIETARIO\n");
+        for (i = 0; i < totalVeiculos; i++)
+            printf("%s | %s | %s | %d | %s\n", veiculos[i].placa, veiculos[i].marca,
+                   veiculos[i].modelo, veiculos[i].ano, veiculos[i].cpf_cliente);
     }
-
-    lerLinha("Novo combustivel: ", novo, sizeof novo);
-    if (strlen(novo) > 0) strncpy(veiculos[idx].combustivel, novo, sizeof veiculos[idx].combustivel - 1);
-
-    salvarDados();
-    printf("Veiculo atualizado.\n");
+    printf("Total de veiculos: %d\n", totalVeiculos);
 }
 
-static void excluirCliente(void) {
-    char buf[64];
-    int idx, i, qtd = 0;
-    lerLinha("CPF do cliente a excluir: ", buf, sizeof buf);
-    soDigitos(buf, buf, sizeof buf);
-    idx = buscarClientePorCPF(buf);
-    if (idx < 0) { printf("Cliente nao encontrado.\n"); return; }
-
-    mostrarCliente(&clientes[idx]);
-    for (i = 0; i < totalVeiculos; i++)
-        if (strcmp(veiculos[i].cpf, clientes[idx].cpf) == 0) qtd++;
-    printf("Atencao: %d veiculo(s) deste cliente tambem sera(ao) excluido(s).\n", qtd);
-
-    if (!confirmar("Confirma a exclusao? (S/N): ")) { printf("Operacao cancelada.\n"); return; }
-
-    /* exclusao em cascata: remove os veiculos do cliente */
-    for (i = totalVeiculos - 1; i >= 0; i--) {
-        if (strcmp(veiculos[i].cpf, clientes[idx].cpf) == 0) {
-            veiculos[i] = veiculos[totalVeiculos - 1];
-            totalVeiculos--;
-        }
-    }
-    clientes[idx] = clientes[totalClientes - 1];
-    totalClientes--;
-
-    salvarDados();
-    printf("Cliente e veiculos excluidos.\n");
-}
-
-static void excluirVeiculo(void) {
-    char placa[16];
-    int idx;
-    lerLinha("Placa do veiculo a excluir: ", placa, sizeof placa);
-    maiusculas(placa);
-    idx = buscarVeiculoPorPlaca(placa);
-    if (idx < 0) { printf("Veiculo nao encontrado.\n"); return; }
-
-    mostrarVeiculo(&veiculos[idx]);
-    if (!confirmar("Confirma a exclusao? (S/N): ")) { printf("Operacao cancelada.\n"); return; }
-
-    veiculos[idx] = veiculos[totalVeiculos - 1];
-    totalVeiculos--;
-    salvarDados();
-    printf("Veiculo excluido.\n");
-}
-
-static void relatorioClientes(void) {
-    int i, j, qtd;
-    printf("\n=== RELATORIO DE CLIENTES (%d) ===\n", totalClientes);
-    for (i = 0; i < totalClientes; i++) {
-        qtd = 0;
-        for (j = 0; j < totalVeiculos; j++)
-            if (strcmp(veiculos[j].cpf, clientes[i].cpf) == 0) qtd++;
-        printf("%s | %s | %s | veiculos: %d\n",
-               clientes[i].cpf, clientes[i].nome, clientes[i].telefone, qtd);
-    }
-}
-
-static void relatorioVeiculos(void) {
-    int i, c;
-    printf("\n=== RELATORIO DE VEICULOS (%d) ===\n", totalVeiculos);
-    for (i = 0; i < totalVeiculos; i++) {
-        c = buscarClientePorCPF(veiculos[i].cpf);
-        printf("%s | %s | %d | %s | proprietario: %s\n",
-               veiculos[i].placa, veiculos[i].modelo, veiculos[i].ano,
-               veiculos[i].combustivel, c >= 0 ? clientes[c].nome : "(desconhecido)");
-    }
-}
-
-/* ---------- programa principal ---------- */
+/* ---------- B. Programa principal ---------- */
 
 int main(void) {
-    int opcao, i;
+    int opcao = -1, i;
 
     carregarDados();
+    strcpy(opcoesMenu[0], "1 - Cadastrar cliente");
+    strcpy(opcoesMenu[1], "2 - Cadastrar veiculo");
+    strcpy(opcoesMenu[2], "3 - Consultar cadastro");
+    strcpy(opcoesMenu[3], "4 - Emitir relatorios");
+    strcpy(opcoesMenu[4], "0 - Sair");
 
-    do {
-        printf("\n===== AUTO CENTER HORIZONTE =====\n");
-        for (i = 0; i < 10; i++) printf("%s\n", MENU[i]);
+    while (opcao != 0) {
+        printf("\n=== AUTO CENTER HORIZONTE ===\n");
+        for (i = 0; i < 5; i++) printf("%s\n", opcoesMenu[i]);
         opcao = lerInteiro("Escolha: ");
         printf("\n");
 
         switch (opcao) {
-        case 1: cadastrarCliente();   break;
-        case 2: cadastrarVeiculo();   break;
-        case 3: consultar();          break;
-        case 4: atualizarCliente();   break;
-        case 5: atualizarVeiculo();   break;
-        case 6: excluirCliente();     break;
-        case 7: excluirVeiculo();     break;
-        case 8: relatorioClientes();  break;
-        case 9: relatorioVeiculos();  break;
-        case 0: printf("Encerrando. Dados salvos.\n"); break;
-        default: printf("Opcao invalida.\n");
+        case 1: cadastrarCliente();  break;
+        case 2: cadastrarVeiculo();  break;
+        case 3: consultarCadastro(); break;
+        case 4: emitirRelatorios();  break;
+        case 0: printf("Encerrando o sistema...\n"); break;
+        default: printf("Opcao invalida!\n");
         }
-    } while (opcao != 0);
-
+    }
     return 0;
 }
